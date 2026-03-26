@@ -1,0 +1,28 @@
+{
+    "name": "@system-inc/nexus",
+    "version": "1.0.0",
+    "description": "Shared ESLint rules and code quality tools for System, Inc. projects",
+    "type": "module",
+    "exports": {
+        "./code-quality/eslint/NexusEsLintConfiguration.mjs": "./code-quality/eslint/NexusEsLintConfiguration.mjs",
+        "./code-quality/eslint/rules/*": "./code-quality/eslint/rules/*"
+    },
+    "files": [
+        "code-quality"
+    ],
+    "dependencies": {
+        "@typescript-eslint/parser": "^8.0.0"
+    },
+    "keywords": [
+        "eslint",
+        "eslint-plugin",
+        "localization",
+        "translations"
+    ],
+    "author": "System, Inc.",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/system-inc/nexus.git"
+    }
+}
