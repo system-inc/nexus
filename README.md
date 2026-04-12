@@ -5,30 +5,30 @@ Shared ESLint rules and code quality tools for System, Inc. projects.
 ## Installation
 
 ```bash
-npm install @system-inc/nexus
+pnpm add @system-inc/nexus
 ```
 
 ## ESLint Rules
 
-### `nexus/localization-untranslated-value-rule`
+### `nexus/boundary-no-internal-import`
 
-Enforces that locale translation files contain actual translations — no empty strings when English has content, and no untranslated values identical to English.
+Prevents importing from `internal/` folders outside of the owning directory. Only files within the parent of an `internal/` directory may import from it.
 
-### `nexus/no-internal-imports-rule`
+### `nexus/boundary-no-nexus-outside-import`
 
-Prevents importing from `internal/` folders outside of the owning directory.
+Disallows imports using `@project`, `@structure`, or `@base` aliases from files within `libraries/nexus/`. Keeps Nexus self-contained and portable.
 
-### `nexus/no-nexus-outside-imports-rule`
+### `nexus/localization-no-untranslated-value`
 
-Disallows imports using `@project`, `@structure`, or `@base` aliases from files within `libraries/nexus/`.
+Enforces that locale translation files contain actual translations. Flags empty strings when English has content, and untranslated values identical to English (4+ characters).
 
 ## Usage
 
-```javascript
+```typescript
 import {
     nexusJavaScriptAndTypeScriptPlugins,
     nexusJavaScriptAndTypeScriptRules,
-} from '@system-inc/nexus/code-quality/eslint/NexusEsLintConfiguration.mjs';
+} from '@system-inc/nexus/code-quality/eslint/NexusEsLintConfiguration';
 
 export default [
     {
@@ -41,3 +41,11 @@ export default [
     },
 ];
 ```
+
+## Peer Dependencies
+
+This package expects the consuming project to provide:
+
+- `eslint` ^10.0.0
+- `@typescript-eslint/parser` ^8.0.0
+- `@typescript-eslint/utils` ^8.0.0
