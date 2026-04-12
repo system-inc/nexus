@@ -1,4 +1,4 @@
-// Localization Untranslated Value Rule
+// Localization — No Untranslated Value
 // Enforces that locale translation files contain actual translations:
 // 1. No empty string values when English has content
 // 2. No untranslated values (identical to English)
@@ -8,9 +8,6 @@
 // Only applies to files inside _translations/ or translations/ directories
 // that are NOT en.ts, index.ts, locales.ts, or *Translations.ts files.
 // Reads the sibling en.ts file via the TypeScript AST parser to compare values.
-//
-// To suppress the identical-to-English check for a specific value, use:
-//   // eslint-disable-next-line nexus/localization-untranslated-value-rule
 
 // Dependencies - Node
 import * as fs from 'fs';
@@ -18,16 +15,23 @@ import * as path from 'path';
 
 // Dependencies - Third-party
 import { parse as parseTypeScript } from '@typescript-eslint/parser';
+import type { TSESLint as TypeScriptEsLintType, TSESTree as TypeScriptEsTreeType } from '@typescript-eslint/utils';
+
+// Types
+interface TranslationFileInterface {
+    localeCode: string;
+    translationsDirectory: string;
+}
 
 // Cache for parsed English translation values (keyed by directory path)
 // Each entry maps dot-separated key paths to their English string values
-const englishValuesCache = new Map();
+const englishValuesCache = new Map<string, Map<string, string> | null>();
 
 // Minimum string length to flag as untranslated (short strings like "on", "is" are often the same)
 const minimumLengthToFlag = 4;
 
 // Extract the key name from an AST property key node
-function getKeyName(keyNode) {
+function getKeyName(keyNode: TypeScriptEsTreeType.Node): string | null {
     if(keyNode.type === 'Identifier') return keyNode.name;
     if(keyNode.type === 'Literal') return String(keyNode.value);
     return null;
@@ -35,22 +39,25 @@ function getKeyName(keyNode) {
 
 // Recursively extract all string literal values from an ObjectExpression AST node.
 // Returns entries as [dotSeparatedKeyPath, stringValue] pairs.
-function extractStringValues(objectExpression, prefix) {
-    const values = [];
+function extractStringValues(
+    objectExpression: TypeScriptEsTreeType.ObjectExpression,
+    prefix: string,
+): [string, string][] {
+    const values: [string, string][] = [];
 
-    for(const prop of objectExpression.properties) {
-        if(prop.type !== 'Property') continue;
+    for(const property of objectExpression.properties) {
+        if(property.type !== 'Property') continue;
 
-        const keyName = getKeyName(prop.key);
+        const keyName = getKeyName(property.key);
         if(!keyName) continue;
 
         const fullKey = prefix ? `${prefix}.${keyName}` : keyName;
 
-        if(prop.value.type === 'Literal' && typeof prop.value.value === 'string') {
-            values.push([fullKey, prop.value.value]);
-        } else if(prop.value.type === 'ObjectExpression') {
-            // Recurse into nested objects
-            values.push(...extractStringValues(prop.value, fullKey));
+        if(property.value.type === 'Literal' && typeof property.value.value === 'string') {
+            values.push([fullKey, property.value.value]);
+        }
+        else if(property.value.type === 'ObjectExpression') {
+            values.push(...extractStringValues(property.value, fullKey));
         }
     }
 
@@ -59,7 +66,7 @@ function extractStringValues(objectExpression, prefix) {
 
 // Parse a translation .ts file using the TypeScript AST parser and extract all string values
 // as a flat map of dot-separated paths (e.g., "Namespace.SubKey.field" -> "value")
-function parseTranslationFile(filePath) {
+function parseTranslationFile(filePath: string): Map<string, string> | null {
     try {
         const content = fs.readFileSync(filePath, 'utf8');
         const ast = parseTypeScript(content, { jsx: true });
@@ -67,17 +74,17 @@ function parseTranslationFile(filePath) {
         // Find the ExportDefaultDeclaration
         const exportDefault = ast.body.find(function (node) {
             return node.type === 'ExportDefaultDeclaration';
-        });
+        }) as TypeScriptEsTreeType.ExportDefaultDeclaration | undefined;
         if(!exportDefault) return null;
 
         // Unwrap TSSatisfiesExpression: export default { ... } satisfies Type
-        let objectExpression = exportDefault.declaration;
-        if(objectExpression.type === 'TSSatisfiesExpression') {
-            objectExpression = objectExpression.expression;
+        let declaration: TypeScriptEsTreeType.Node = exportDefault.declaration;
+        if(declaration.type === 'TSSatisfiesExpression') {
+            declaration = declaration.expression;
         }
-        if(objectExpression.type !== 'ObjectExpression') return null;
+        if(declaration.type !== 'ObjectExpression') return null;
 
-        const entries = extractStringValues(objectExpression, '');
+        const entries = extractStringValues(declaration, '');
         return new Map(entries);
     } catch {
         return null;
@@ -85,9 +92,9 @@ function parseTranslationFile(filePath) {
 }
 
 // Get English translation values for a given translations directory (cached)
-function getEnglishValues(translationsDirectory) {
+function getEnglishValues(translationsDirectory: string): Map<string, string> | null {
     if(englishValuesCache.has(translationsDirectory)) {
-        return englishValuesCache.get(translationsDirectory);
+        return englishValuesCache.get(translationsDirectory) ?? null;
     }
 
     const enFilePath = path.join(translationsDirectory, 'en.ts');
@@ -97,7 +104,7 @@ function getEnglishValues(translationsDirectory) {
 }
 
 // Check if a file is a locale translation file that should be validated
-function getTranslationFileInfo(filePath) {
+function getTranslationFileInfo(filePath: string): TranslationFileInterface | null {
     const normalizedPath = filePath.replace(/\\/g, '/');
     const fileName = path.basename(filePath);
 
@@ -117,12 +124,11 @@ function getTranslationFileInfo(filePath) {
     }
 
     // Must be inside a _translations/ or translations/ directory (at any depth)
-    // e.g., translations/agents/fr.ts or _translations/fr.ts
     const directory = path.dirname(normalizedPath);
     const pathParts = directory.split('/');
-    const isInTranslationsDir = pathParts.some(
-        (part) => part === '_translations' || part === 'translations',
-    );
+    const isInTranslationsDir = pathParts.some(function (part) {
+        return part === '_translations' || part === 'translations';
+    });
     if(!isInTranslationsDir) return null;
 
     // The en.ts sibling must exist in the same directory
@@ -140,17 +146,23 @@ function getTranslationFileInfo(filePath) {
 
 // Recursively visit all string literal properties in an ObjectExpression,
 // building dot-separated key paths and reporting violations.
-function visitProperties(objectExpression, prefix, context, englishValues, localeCode) {
-    for(const prop of objectExpression.properties) {
-        if(prop.type !== 'Property') continue;
+function visitProperties(
+    objectExpression: TypeScriptEsTreeType.ObjectExpression,
+    prefix: string,
+    context: TypeScriptEsLintType.RuleContext<'missingTranslation' | 'identicalToSource', []>,
+    englishValues: Map<string, string>,
+    localeCode: string,
+): void {
+    for(const property of objectExpression.properties) {
+        if(property.type !== 'Property') continue;
 
-        const keyName = getKeyName(prop.key);
+        const keyName = getKeyName(property.key);
         if(!keyName) continue;
 
         const fullKey = prefix ? `${prefix}.${keyName}` : keyName;
 
-        if(prop.value.type === 'Literal' && typeof prop.value.value === 'string') {
-            const localeValue = prop.value.value;
+        if(property.value.type === 'Literal' && typeof property.value.value === 'string') {
+            const localeValue = property.value.value;
             const englishValue = englishValues.get(fullKey);
 
             // Skip if no English value to compare against
@@ -159,7 +171,7 @@ function visitProperties(objectExpression, prefix, context, englishValues, local
             // Check for empty values
             if(localeValue.trim().length === 0 && englishValue.trim().length > 0) {
                 context.report({
-                    node: prop.value,
+                    node: property.value,
                     messageId: 'missingTranslation',
                     data: {
                         key: fullKey,
@@ -172,7 +184,7 @@ function visitProperties(objectExpression, prefix, context, englishValues, local
             // Check for untranslated values (identical to English)
             if(localeValue === englishValue && englishValue.length >= minimumLengthToFlag) {
                 context.report({
-                    node: prop.value,
+                    node: property.value,
                     messageId: 'identicalToSource',
                     data: {
                         key: fullKey,
@@ -181,57 +193,56 @@ function visitProperties(objectExpression, prefix, context, englishValues, local
                     },
                 });
             }
-        } else if(prop.value.type === 'ObjectExpression') {
-            // Recurse into nested objects
-            visitProperties(prop.value, fullKey, context, englishValues, localeCode);
+        }
+        else if(property.value.type === 'ObjectExpression') {
+            visitProperties(property.value, fullKey, context, englishValues, localeCode);
         }
     }
 }
 
-// ESLint Rule
-export default {
-    meta: {
-        type: 'problem',
-        docs: {
-            description:
-                'Enforce that locale translation files contain actual translations, not empty or copy-pasted English strings.',
-            category: 'Internationalization',
-            recommended: true,
-        },
-        messages: {
-            missingTranslation: "Translation for '{{key}}' is empty. Provide a '{{locale}}' translation.",
-            identicalToSource:
-                "Translation for '{{key}}' is identical to English (\"{{value}}\"). Translate it for the '{{locale}}' locale.",
-        },
-        schema: [],
-    },
-    create(context) {
-        const filePath = context.filename;
-        const fileInfo = getTranslationFileInfo(filePath);
-
-        // Only apply to locale translation files
-        if(!fileInfo) return {};
-
-        // Load English values for comparison
-        const englishValues = getEnglishValues(fileInfo.translationsDirectory);
-        if(!englishValues) return {};
-
-        return {
-            // Visit the default export: export default { ... }
-            ExportDefaultDeclaration(node) {
-                const declaration = node.declaration;
-
-                // Handle: export default { ... } satisfies Type
-                let objectExpression = declaration;
-                if(declaration.type === 'TSSatisfiesExpression') {
-                    objectExpression = declaration.expression;
-                }
-
-                if(objectExpression.type !== 'ObjectExpression') return;
-
-                // Recursively visit all properties
-                visitProperties(objectExpression, '', context, englishValues, fileInfo.localeCode);
+// Rule
+const LocalizationNoUntranslatedValueRule: TypeScriptEsLintType.RuleModule<'missingTranslation' | 'identicalToSource'> =
+    {
+        meta: {
+            type: 'problem',
+            docs: {
+                description:
+                    'Enforce that locale translation files contain actual translations, not empty or copy-pasted English strings.',
             },
-        };
-    },
-};
+            messages: {
+                missingTranslation: "Translation for '{{key}}' is empty. Provide a '{{locale}}' translation.",
+                identicalToSource:
+                    "Translation for '{{key}}' is identical to English (\"{{value}}\"). Translate it for the '{{locale}}' locale.",
+            },
+            schema: [],
+        },
+        defaultOptions: [],
+        create(context) {
+            const filePath = context.filename;
+            const fileInfo = getTranslationFileInfo(filePath);
+
+            // Only apply to locale translation files
+            if(!fileInfo) return {};
+
+            // Load English values for comparison
+            const englishValues = getEnglishValues(fileInfo.translationsDirectory);
+            if(!englishValues) return {};
+
+            return {
+                ExportDefaultDeclaration(node) {
+                    // Handle: export default { ... } satisfies Type
+                    let declaration: TypeScriptEsTreeType.Node = node.declaration;
+                    if(declaration.type === 'TSSatisfiesExpression') {
+                        declaration = declaration.expression;
+                    }
+
+                    if(declaration.type !== 'ObjectExpression') return;
+
+                    visitProperties(declaration, '', context, englishValues, fileInfo.localeCode);
+                },
+            };
+        },
+    };
+
+// Export - Default
+export default LocalizationNoUntranslatedValueRule;

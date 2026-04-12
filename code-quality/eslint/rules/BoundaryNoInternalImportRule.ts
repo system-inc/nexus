@@ -1,50 +1,54 @@
+// Boundary — No Internal Import
+// Prevents importing from internal folders when not appropriate.
+// Only files within the owning folder (the directory directly above `internal/`)
+// may import from that internal directory.
+
 // Dependencies - Node
 import NodePath from 'path';
 import NodeProcess from 'process';
 
-// ESLint rule to prevent importing from internal folders when not appropriate
-// This protect a file from being imported when it is not intended to be used outside of specific folders
-const NoInternalImportsRule = {
+// Dependencies - Types
+import type { TSESLint as TypeScriptEsLintType } from '@typescript-eslint/utils';
+
+// Rule
+const BoundaryNoInternalImportRule: TypeScriptEsLintType.RuleModule<'aliasedInternal' | 'outsideInternal'> = {
     meta: {
         type: 'problem',
+        messages: {
+            aliasedInternal: "Aliased imports must not include 'internal': '{{importPath}}'",
+            outsideInternal: "Only files within '{{owningFolder}}' can import from its internal folder.",
+        },
         schema: [],
     },
+    defaultOptions: [],
     create(context) {
         return {
             ImportDeclaration(node) {
                 const importPath = node.source.value;
                 const importingFile = context.filename;
 
-                if(!importPath.includes('internal')) return;
+                if(typeof importPath !== 'string' || !importPath.includes('internal')) return;
 
                 // Aliased or absolute: block immediately
                 if(!importPath.startsWith('.')) {
                     context.report({
                         node,
-                        message: `Aliased imports must not include 'internal': '${importPath}'`,
+                        messageId: 'aliasedInternal',
+                        data: { importPath },
                     });
                     return;
                 }
 
                 // Resolve the imported file path
-                const resolvedImport = NodePath.resolve(
-                    NodePath.dirname(importingFile),
-                    importPath,
-                );
+                const resolvedImport = NodePath.resolve(NodePath.dirname(importingFile), importPath);
 
-                const relativeImportPath = NodePath.relative(
-                    NodeProcess.cwd(),
-                    resolvedImport,
-                );
-                const relativeImporterPath = NodePath.relative(
-                    NodeProcess.cwd(),
-                    importingFile,
-                );
+                const relativeImportPath = NodePath.relative(NodeProcess.cwd(), resolvedImport);
+                const relativeImporterPath = NodePath.relative(NodeProcess.cwd(), importingFile);
 
                 const importParts = relativeImportPath.split(NodePath.sep);
                 const importerParts = relativeImporterPath.split(NodePath.sep);
 
-                // 🔥 Find the LAST occurrence of "internal"
+                // Find the LAST occurrence of "internal"
                 const internalIndex = importParts.lastIndexOf('internal');
                 if(internalIndex <= 0) {
                     return;
@@ -57,12 +61,11 @@ const NoInternalImportsRule = {
                 const importingFilePath = importerParts.join(NodePath.sep);
 
                 // Check if importing file path starts with the owning folder
-                if(
-                    !importingFilePath.startsWith(owningFolderPath + NodePath.sep)
-                ) {
+                if(!importingFilePath.startsWith(owningFolderPath + NodePath.sep)) {
                     context.report({
                         node,
-                        message: `Only files within '${owningFolderPath}' can import from its internal folder.`,
+                        messageId: 'outsideInternal',
+                        data: { owningFolder: owningFolderPath },
                     });
                 }
             },
@@ -71,4 +74,4 @@ const NoInternalImportsRule = {
 };
 
 // Export - Default
-export default NoInternalImportsRule;
+export default BoundaryNoInternalImportRule;

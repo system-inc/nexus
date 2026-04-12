@@ -1,17 +1,30 @@
 {
     "name": "@system-inc/nexus",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "description": "Shared ESLint rules and code quality tools for System, Inc. projects",
     "type": "module",
+    "packageManager": "pnpm@10.33.0",
     "exports": {
-        "./code-quality/eslint/NexusEsLintConfiguration.mjs": "./code-quality/eslint/NexusEsLintConfiguration.mjs",
+        "./code-quality/eslint/NexusEsLintConfiguration": "./code-quality/eslint/NexusEsLintConfiguration.ts",
         "./code-quality/eslint/rules/*": "./code-quality/eslint/rules/*"
     },
     "files": [
         "code-quality"
     ],
-    "dependencies": {
-        "@typescript-eslint/parser": "^8.0.0"
+    "peerDependencies": {
+        "@typescript-eslint/parser": "^8.0.0",
+        "@typescript-eslint/utils": "^8.0.0",
+        "eslint": "^10.0.0"
+    },
+    "devDependencies": {
+        "prettier": "npm:@system-inc/prettier@^3.2.1"
+    },
+    "prettier": {
+        "tabWidth": 4,
+        "useTabs": false,
+        "semi": true,
+        "singleQuote": true,
+        "printWidth": 120
     },
     "keywords": [
         "eslint",
