@@ -1,6 +1,6 @@
 {
     "name": "@system-inc/nexus",
-    "version": "2.0.0",
+    "version": "2.0.1",
     "description": "Shared ESLint rules and code quality tools for System, Inc. projects",
     "type": "module",
     "packageManager": "pnpm@10.33.0",

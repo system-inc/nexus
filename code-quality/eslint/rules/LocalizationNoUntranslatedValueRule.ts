@@ -64,6 +64,71 @@ function extractStringValues(
     return values;
 }
 
+// Resolve an `export default ...` expression to its underlying
+// ObjectExpression, supporting four shapes:
+//   1. `export default { ... }`
+//   2. `export default { ... } satisfies Type`
+//   3. `export default { ... } as Type`
+//   4. `export default Identifier` / `export default Identifier as Type`
+//      where `Identifier` is a `const` declared earlier in the same
+//      file. Used by some translation files when the locale data needs
+//      its literal-string types preserved through an intermediate
+//      `as const` binding (so a slot-validator helper can compare
+//      placeholders against the contract) before the final widening
+//      assertion at export.
+//
+// Returns the resolved ObjectExpression, or null if the export shape
+// isn't one we recognize. The `programBody` argument is the AST's
+// top-level statement list, used to follow identifier references.
+function resolveExportedObjectExpression(
+    declaration: TypeScriptEsTreeType.Node,
+    programBody: TypeScriptEsTreeType.ProgramStatement[],
+): TypeScriptEsTreeType.ObjectExpression | null {
+    let current: TypeScriptEsTreeType.Node = declaration;
+
+    // Unwrap `... satisfies Type` and `... as Type` — both are
+    // type-only assertions that wrap an expression.
+    if(current.type === 'TSSatisfiesExpression' || current.type === 'TSAsExpression') {
+        current = current.expression;
+    }
+
+    if(current.type === 'ObjectExpression') {
+        return current;
+    }
+
+    // Identifier reference — look up the matching `const Name = { ... }`
+    // (with optional `as const` / `satisfies` / `as Type` wrapping) in
+    // the same file's top-level statements.
+    if(current.type === 'Identifier') {
+        const identifierName = current.name;
+        for(const statement of programBody) {
+            if(statement.type !== 'VariableDeclaration') continue;
+            for(const declarator of statement.declarations) {
+                if(
+                    declarator.type !== 'VariableDeclarator' ||
+                    declarator.id.type !== 'Identifier' ||
+                    declarator.id.name !== identifierName ||
+                    !declarator.init
+                ) {
+                    continue;
+                }
+                let initializer: TypeScriptEsTreeType.Node = declarator.init;
+                if(
+                    initializer.type === 'TSSatisfiesExpression' ||
+                    initializer.type === 'TSAsExpression'
+                ) {
+                    initializer = initializer.expression;
+                }
+                if(initializer.type === 'ObjectExpression') {
+                    return initializer;
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
 // Parse a translation .ts file using the TypeScript AST parser and extract all string values
 // as a flat map of dot-separated paths (e.g., "Namespace.SubKey.field" -> "value")
 function parseTranslationFile(filePath: string): Map<string, string> | null {
@@ -77,14 +142,10 @@ function parseTranslationFile(filePath: string): Map<string, string> | null {
         }) as TypeScriptEsTreeType.ExportDefaultDeclaration | undefined;
         if(!exportDefault) return null;
 
-        // Unwrap TSSatisfiesExpression: export default { ... } satisfies Type
-        let declaration: TypeScriptEsTreeType.Node = exportDefault.declaration;
-        if(declaration.type === 'TSSatisfiesExpression') {
-            declaration = declaration.expression;
-        }
-        if(declaration.type !== 'ObjectExpression') return null;
+        const objectExpression = resolveExportedObjectExpression(exportDefault.declaration, ast.body);
+        if(!objectExpression) return null;
 
-        const entries = extractStringValues(declaration, '');
+        const entries = extractStringValues(objectExpression, '');
         return new Map(entries);
     } catch {
         return null;
@@ -230,15 +291,15 @@ const LocalizationNoUntranslatedValueRule: TypeScriptEsLintType.RuleModule<'miss
 
             return {
                 ExportDefaultDeclaration(node) {
-                    // Handle: export default { ... } satisfies Type
-                    let declaration: TypeScriptEsTreeType.Node = node.declaration;
-                    if(declaration.type === 'TSSatisfiesExpression') {
-                        declaration = declaration.expression;
-                    }
+                    // Resolve the export shape — supports inline objects,
+                    // `satisfies` / `as` assertions, and identifier
+                    // references back to a local `const Foo = { ... }`.
+                    const program = (node.parent ?? node) as TypeScriptEsTreeType.Program;
+                    const programBody = program.type === 'Program' ? program.body : [];
+                    const objectExpression = resolveExportedObjectExpression(node.declaration, programBody);
+                    if(!objectExpression) return;
 
-                    if(declaration.type !== 'ObjectExpression') return;
-
-                    visitProperties(declaration, '', context, englishValues, fileInfo.localeCode);
+                    visitProperties(objectExpression, '', context, englishValues, fileInfo.localeCode);
                 },
             };
         },
